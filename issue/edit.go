@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -149,7 +150,7 @@ func writeIssue(old *github.Issue, updated []byte, isBulk bool) (issue *github.I
 	if getInt(old.Number) == 0 {
 		comment := strings.TrimSpace(sdata[off:])
 		edit.Body = &comment
-		issue, _, err := client.Issues.Create(projectOwner, projectRepo, &edit)
+		issue, _, err := client.Issues.Create(context.Background(), projectOwner, projectRepo, &edit)
 		if err != nil {
 			fmt.Fprintf(&errbuf, "error creating issue: %v\n", err)
 			return nil, nil
@@ -178,7 +179,7 @@ func writeIssue(old *github.Issue, updated []byte, isBulk bool) (issue *github.I
 	var failed bool
 	var did []string
 	if comment != "" {
-		_, _, err := client.Issues.CreateComment(projectOwner, projectRepo, getInt(old.Number), &github.IssueComment{
+		_, _, err := client.Issues.CreateComment(context.Background(), projectOwner, projectRepo, getInt(old.Number), &github.IssueComment{
 			Body: &comment,
 		})
 		if err != nil {
@@ -190,7 +191,7 @@ func writeIssue(old *github.Issue, updated []byte, isBulk bool) (issue *github.I
 	}
 
 	if edit.Title != nil || edit.State != nil || edit.Assignee != nil || edit.Labels != nil || edit.Milestone != nil {
-		_, _, err := client.Issues.Edit(projectOwner, projectRepo, getInt(old.Number), &edit)
+		_, _, err := client.Issues.Edit(context.Background(), projectOwner, projectRepo, getInt(old.Number), &edit)
 		if err != nil {
 			fmt.Fprintf(&errbuf, "error changing metadata: %v\n", err)
 			failed = true
@@ -199,7 +200,7 @@ func writeIssue(old *github.Issue, updated []byte, isBulk bool) (issue *github.I
 		}
 	}
 	if len(addLabels) > 0 {
-		_, _, err := client.Issues.AddLabelsToIssue(projectOwner, projectRepo, getInt(old.Number), addLabels)
+		_, _, err := client.Issues.AddLabelsToIssue(context.Background(), projectOwner, projectRepo, getInt(old.Number), addLabels)
 		if err != nil {
 			fmt.Fprintf(&errbuf, "error adding labels: %v\n", err)
 			failed = true
@@ -213,7 +214,7 @@ func writeIssue(old *github.Issue, updated []byte, isBulk bool) (issue *github.I
 	}
 	if len(removeLabels) > 0 {
 		for _, label := range removeLabels {
-			_, err := client.Issues.RemoveLabelForIssue(projectOwner, projectRepo, getInt(old.Number), label)
+			_, err := client.Issues.RemoveLabelForIssue(context.Background(), projectOwner, projectRepo, getInt(old.Number), label)
 			if err != nil {
 				fmt.Fprintf(&errbuf, "error removing label %s: %v\n", label, err)
 				failed = true
@@ -460,23 +461,18 @@ func bulkWriteIssue(old *github.Issue, updated []byte, status func(string)) (ids
 		if index%10 == 0 && index > 0 {
 			status(fmt.Sprintf("updated %d/%d issues", index, len(ids)))
 		}
-		// Check rate limits here (in contrast to everywhere else in this program)
-		// to avoid needless failure halfway through the loop.
-		for client.Rate().Limit > 0 && client.Rate().Remaining == 0 {
-			delta := (client.Rate().Reset.Sub(time.Now())/time.Minute + 2) * time.Minute
-			if delta < 0 {
-				delta = 2 * time.Minute
+		// repeatedly try to write, backing off for rate limit if warned.
+		for {
+			_, err := writeIssue(old, updated, true)
+			if isRateLimitError(err) {
+				waitForRateLimit(status)
+				continue
 			}
-			status(fmt.Sprintf("updated %d/%d issues; pausing %d minutes to respect GitHub rate limit", index, len(ids), int(delta/time.Minute)))
-			time.Sleep(delta)
-			if _, _, err := client.RateLimit(); err != nil {
-				status(fmt.Sprintf("reading rate limit: %v", err))
+			if err != nil {
+				status(fmt.Sprintf("writing #%d: %s", number, strings.Replace(err.Error(), "\n", "\n\t", -1)))
+				failed = true
+				break
 			}
-		}
-		*old.Number = number
-		if _, err := writeIssue(old, updated, true); err != nil {
-			status(fmt.Sprintf("writing #%d: %s", number, strings.Replace(err.Error(), "\n", "\n\t", -1)))
-			failed = true
 		}
 	}
 
@@ -484,4 +480,41 @@ func bulkWriteIssue(old *github.Issue, updated []byte, status func(string)) (ids
 		return ids, fmt.Errorf("failed to update all issues")
 	}
 	return ids, nil
+}
+
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	_, ok := err.(*github.RateLimitError)
+	return ok
+}
+
+func waitForRateLimit(status func(string)) {
+	for {
+		limits, _, err := client.RateLimits(context.Background())
+		if err != nil {
+			status(fmt.Sprintf("reading rate limit: %v", err))
+			// sleep for a minute, let either Github Ops or user figure it out.
+			time.Sleep(time.Minute)
+			continue
+		}
+		switch {
+		case limits == nil:
+			return // cannot determine limits.
+		case limits.Core == nil:
+			return // cannot determine limits.
+		case limits.Core.Limit < 1:
+			time.Sleep(time.Minute)
+			return // limits appear to be infinite, but we were asked to wait, so.. zzz.
+		case limits.Core.Remaining > 0:
+			return // we are permitted more requests.
+		}
+		delta := (limits.Core.Reset.Sub(time.Now())/time.Minute + 2) * time.Minute
+		if delta < 0 {
+			delta = 2 * time.Minute
+		}
+		status(fmt.Sprintf("pausing %d minutes to respect GitHub rate limit", int(delta/time.Minute)))
+		time.Sleep(delta)
+	}
 }

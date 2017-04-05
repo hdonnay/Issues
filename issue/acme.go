@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -276,7 +277,7 @@ func (w *awin) setMilestone1(milestoneID, n int) {
 	var edit github.IssueRequest
 	edit.Milestone = &milestoneID
 
-	_, _, err := client.Issues.Edit(projectOwner, projectRepo, n, &edit)
+	_, _, err := client.Issues.Edit(context.Background(), projectOwner, projectRepo, n, &edit)
 	if err != nil {
 		w.err(fmt.Sprintf("Error changing issue #%d: %v", n, err))
 	}
