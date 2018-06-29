@@ -239,6 +239,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -253,13 +254,17 @@ import (
 
 var (
 	acmeFlag     = flag.Bool("a", false, "open in new acme window")
+	acmeWrap     = flag.Int("w", 120, "wrap width for printing issues in acme windows")
 	editFlag     = flag.Bool("e", false, "edit in system editor")
 	jsonFlag     = flag.Bool("json", false, "write JSON output")
 	project      = flag.String("p", "golang/go", "GitHub owner/repo name")
 	rawFlag      = flag.Bool("raw", false, "do no processing of markdown")
 	tokenFile    = flag.String("token", "", "read GitHub token personal access token from `file` (default $HOME/.github-issue-token)")
+	apiRootArg   = flag.String("api", "", "base url for github instance (default github.com)")
 	projectOwner = ""
 	projectRepo  = ""
+
+	apiRoot *url.URL
 )
 
 func usage() {
@@ -295,6 +300,13 @@ func main() {
 	}
 	projectOwner = f[0]
 	projectRepo = f[1]
+	if *apiRootArg != "" {
+		u, err := url.Parse(*apiRootArg)
+		if err != nil {
+			log.Fatal(err)
+		}
+		apiRoot = u
+	}
 
 	loadAuth()
 
@@ -369,7 +381,7 @@ func printIssue(w io.Writer, issue *github.Issue) error {
 	}
 	fmt.Fprintf(w, "Labels: %s\n", strings.Join(getLabelNames(issue.Labels), " "))
 	fmt.Fprintf(w, "Milestone: %s\n", getMilestoneTitle(issue.Milestone))
-	fmt.Fprintf(w, "URL: https://github.com/%s/%s/issues/%d\n", projectOwner, projectRepo, getInt(issue.Number))
+	fmt.Fprintf(w, "URL: %s\n", issue.GetHTMLURL())
 
 	fmt.Fprintf(w, "\nReported by %s (%s)\n", getUserLogin(issue.User), getTime(issue.CreatedAt).Format(timeFormat))
 	if issue.Body != nil {
@@ -665,7 +677,7 @@ func wrap(t string, prefix string) string {
 	t = strings.Replace(t, "\r\n", "\n", -1)
 	max := 70
 	if *acmeFlag {
-		max = 120
+		max = *acmeWrap
 	}
 	lines := strings.Split(t, "\n")
 	for i, line := range lines {
@@ -719,6 +731,8 @@ func loadAuth() {
 		Source: &tokenSource{AccessToken: authToken},
 	}
 	client = github.NewClient(&http.Client{Transport: t})
+	client.BaseURL = apiRoot
+	client.UploadURL = apiRoot
 }
 
 type tokenSource oauth2.Token
