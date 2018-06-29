@@ -442,6 +442,9 @@ func printIssue(w io.Writer, issue *github.Issue) error {
 			switch event := getString(ev.Event); event {
 			case "mentioned", "subscribed", "unsubscribed":
 				// ignore
+			case "added_to_project", "moved_columns_in_project", "removed_from_project":
+				event = strings.Replace(event, "_", " ", -1)
+				fallthrough
 			default:
 				fmt.Fprintf(w, "\n* %s %s (%s)\n", getUserLogin(ev.Actor), event, getTime(ev.CreatedAt).Format(timeFormat))
 			case "closed", "referenced", "merged":
@@ -887,7 +890,7 @@ func toJSON(issue *github.Issue) *Issue {
 		Closed:    getTime(issue.ClosedAt),
 		Labels:    getLabelNames(issue.Labels),
 		Milestone: getMilestoneTitle(issue.Milestone),
-		URL:       fmt.Sprintf("https://github.com/%s/%s/issues/%d\n", projectOwner, projectRepo, getInt(issue.Number)),
+		URL:       issue.GetHTMLURL(),
 		Reporter:  getUserLogin(issue.User),
 		Created:   getTime(issue.CreatedAt),
 		Text:      getString(issue.Body),
