@@ -120,7 +120,7 @@ func writeIssue(old *github.Issue, updated []byte, isBulk bool) (issue *github.I
 			edit.State = diff(line, "State:", getString(old.State))
 
 		case strings.HasPrefix(line, "Assignee:"):
-			edit.Assignee = diff(line, "Assignee:", getUserLogin(old.Assignee))
+			edit.Assignees = diffList(line, "Assignee:", getUserLogins(old.Assignees))
 
 		case strings.HasPrefix(line, "Closed:"):
 			continue

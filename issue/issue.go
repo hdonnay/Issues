@@ -375,7 +375,7 @@ func printIssue(w io.Writer, issue *github.Issue) error {
 
 	fmt.Fprintf(w, "Title: %s\n", getString(issue.Title))
 	fmt.Fprintf(w, "State: %s\n", getString(issue.State))
-	fmt.Fprintf(w, "Assignee: %s\n", getUserLogin(issue.Assignee))
+	fmt.Fprintf(w, "Assignee: %s\n", strings.Join(getUserLogins(issue.Assignees), " "))
 	if issue.ClosedAt != nil {
 		fmt.Fprintf(w, "Closed: %s\n", getTime(issue.ClosedAt).Format(timeFormat))
 	}
@@ -763,6 +763,15 @@ func getUserLogin(x *github.User) string {
 		return ""
 	}
 	return *x.Login
+}
+
+func getUserLogins(x []*github.User) []string {
+	var out []string
+	for _, u := range x {
+		out = append(out, getUserLogin(u))
+	}
+	sort.Strings(out)
+	return out
 }
 
 func getTime(x *time.Time) time.Time {
