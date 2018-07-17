@@ -453,6 +453,7 @@ func (w *awin) load() {
 			w.Fprintf("body", "Search %s\n\n", w.query)
 		}
 		w.printTabbed(buf.String())
+		w.sort()
 		w.Ctl("clean")
 
 	case modeBulk:
@@ -602,6 +603,7 @@ func (w *awin) sort() {
 	}
 	w.Addr("0/^[0-9]/,")
 	w.Write("data", []byte(strings.Join(lines, "\n")+suffix))
+	w.Ctl("clean")
 	w.Addr("0")
 	w.Ctl("dot=addr")
 	w.Ctl("show")
