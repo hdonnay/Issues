@@ -677,6 +677,7 @@ func loadMilestones() ([]*github.Milestone, error) {
 
 func wrap(t string, prefix string) string {
 	out := ""
+	lit := false
 	t = strings.Replace(t, "\r\n", "\n", -1)
 	max := 70
 	if *acmeFlag {
@@ -687,15 +688,20 @@ func wrap(t string, prefix string) string {
 		if i > 0 {
 			out += "\n" + prefix
 		}
+		if strings.HasPrefix(line, "```") {
+			lit = !lit
+		}
 		s := line
-		for len(s) > max {
-			i := strings.LastIndex(s[:max], " ")
-			if i < 0 {
-				i = max - 1
+		if !lit {
+			for len(s) > max {
+				i := strings.LastIndex(s[:max], " ")
+				if i < 0 {
+					i = max - 1
+				}
+				i++
+				out += s[:i] + "\n" + prefix
+				s = s[i:]
 			}
-			i++
-			out += s[:i] + "\n" + prefix
-			s = s[i:]
 		}
 		out += s
 	}
