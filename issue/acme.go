@@ -386,6 +386,9 @@ func (w *awin) load() {
 	case modeCreate:
 		w.clear()
 		w.Write("body", []byte(createTemplate))
+		if b, err := w.ReadAll("tag"); err == nil && !strings.Contains(string(b), "|fmt") {
+			w.Fprintf("tag", "|fmt ")
+		}
 		w.Ctl("clean")
 
 	case modeSingle:
@@ -399,6 +402,9 @@ func (w *awin) load() {
 			break
 		}
 		w.Write("body", buf.Bytes())
+		if b, err := w.ReadAll("tag"); err == nil && !strings.Contains(string(b), "|fmt") {
+			w.Fprintf("tag", "|fmt ")
+		}
 		w.Ctl("clean")
 		w.github = issue
 
