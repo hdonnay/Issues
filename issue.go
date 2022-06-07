@@ -240,6 +240,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -247,7 +248,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-github/github"
+	"github.com/google/go-github/v45/github"
 	"golang.org/x/oauth2"
 )
 
@@ -527,8 +528,8 @@ func searchIssues(project, q string) ([]*github.Issue, error) {
 			},
 		})
 		for i := range x.Issues {
-			updateIssueCache(project, &x.Issues[i])
-			all = append(all, &x.Issues[i])
+			updateIssueCache(project, x.Issues[i])
+			all = append(all, x.Issues[i])
 		}
 		if err != nil {
 			return all, err
@@ -662,30 +663,42 @@ func loadMilestones(project string) ([]*github.Milestone, error) {
 }
 
 func wrap(t string, prefix string) string {
-	out := ""
+	var out strings.Builder
 	t = strings.Replace(t, "\r\n", "\n", -1)
 	max := 70
 	if *acmeFlag {
-		max = 120
+		max = 100
 	}
+	doWrap := true
 	lines := strings.Split(t, "\n")
 	for i, line := range lines {
 		if i > 0 {
-			out += "\n" + prefix
+			out.WriteByte('\n')
+			out.WriteString(prefix)
+		}
+		if line == "```" {
+			doWrap = !doWrap
 		}
 		s := line
-		for len(s) > max {
-			i := strings.LastIndex(s[:max], " ")
-			if i < 0 {
-				i = max - 1
+		if doWrap {
+			for len(s) > max {
+				i := strings.LastIndex(s[:max], " ")
+				if i < 0 {
+					i = strings.Index(s, " ")
+					if i == -1 {
+						i = len(s) - 1
+					}
+				}
+				i++
+				out.WriteString(s[:i])
+				out.WriteByte('\n')
+				out.WriteString(prefix)
+				s = s[i:]
 			}
-			i++
-			out += s[:i] + "\n" + prefix
-			s = s[i:]
 		}
-		out += s
+		out.WriteString(s)
 	}
-	return out
+	return out.String()
 }
 
 var client *github.Client
@@ -694,32 +707,53 @@ var client *github.Client
 var authToken string
 
 func loadAuth() {
-	const short = ".github-issue-token"
-	filename := filepath.Clean(os.Getenv("HOME") + "/" + short)
-	shortFilename := filepath.Clean("$HOME/" + short)
-	if *tokenFile != "" {
-		filename = *tokenFile
-		shortFilename = *tokenFile
-	}
-	data, err := ioutil.ReadFile(filename)
-	if err != nil {
-		log.Fatal("reading token: ", err, "\n\n"+
-			"Please create a personal access token at https://github.com/settings/tokens/new\n"+
-			"and write it to ", shortFilename, " to use this program.\n"+
-			"The token only needs the repo scope, or private_repo if you want to\n"+
-			"view or edit issues for private repositories.\n"+
-			"The benefit of using a personal access token over using your GitHub\n"+
-			"password directly is that you can limit its use and revoke it at any time.\n\n")
-	}
-	fi, err := os.Stat(filename)
-	if fi.Mode()&0077 != 0 {
-		log.Fatalf("reading token: %s mode is %#o, want %#o", shortFilename, fi.Mode()&0777, fi.Mode()&0700)
+	var data []byte
+	var err error
+	switch {
+	case lookExec("secret-tool") == nil:
+		// TODO(hank) This host argument should be parameterized.
+		cmd := exec.Command("secret-tool", "lookup", "host", "github.com", "application", "Issues")
+		data, err = cmd.Output()
+		if err != nil {
+			log.Printf("ran command: %v", cmd.Args)
+			log.Fatalf("error from `secret-tool`: %v", err)
+		}
+	default:
+		const short = ".github-issue-token"
+		filename := filepath.Clean(os.Getenv("HOME") + "/" + short)
+		shortFilename := filepath.Clean("$HOME/" + short)
+		if *tokenFile != "" {
+			filename = *tokenFile
+			shortFilename = *tokenFile
+		}
+		data, err = ioutil.ReadFile(filename)
+		if err != nil {
+			log.Fatal("reading token: ", err, "\n\n"+
+				"Please create a personal access token at https://github.com/settings/tokens/new\n"+
+				"and write it to ", shortFilename, " to use this program.\n"+
+				"The token only needs the repo scope, or private_repo if you want to\n"+
+				"view or edit issues for private repositories.\n"+
+				"The benefit of using a personal access token over using your GitHub\n"+
+				"password directly is that you can limit its use and revoke it at any time.\n\n")
+		}
+		fi, err := os.Stat(filename)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if fi.Mode()&0077 != 0 {
+			log.Fatalf("reading token: %s mode is %#o, want %#o", shortFilename, fi.Mode()&0777, fi.Mode()&0700)
+		}
 	}
 	authToken = strings.TrimSpace(string(data))
 	t := &oauth2.Transport{
 		Source: &tokenSource{AccessToken: authToken},
 	}
 	client = github.NewClient(&http.Client{Transport: t})
+}
+
+func lookExec(n string) (err error) {
+	_, err = exec.LookPath(n)
+	return err
 }
 
 type tokenSource oauth2.Token
@@ -763,7 +797,7 @@ func getMilestoneTitle(x *github.Milestone) string {
 	return *x.Title
 }
 
-func getLabelNames(x []github.Label) []string {
+func getLabelNames(x []*github.Label) []string {
 	var out []string
 	for _, lab := range x {
 		out = append(out, getString(lab.Name))
