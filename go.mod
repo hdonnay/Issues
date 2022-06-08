@@ -1,4 +1,4 @@
-module rsc.io/github
+module github.com/hdonnay/Issues
 
 go 1.18
 

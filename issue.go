@@ -714,10 +714,12 @@ func loadAuth() {
 		// TODO(hank) This host argument should be parameterized.
 		cmd := exec.Command("secret-tool", "lookup", "host", "github.com", "application", "Issues")
 		data, err = cmd.Output()
-		if err != nil {
-			log.Printf("ran command: %v", cmd.Args)
-			log.Fatalf("error from `secret-tool`: %v", err)
+		if err == nil {
+			break
 		}
+		log.Printf("ran command: %v", cmd.Args)
+		log.Printf("error from `secret-tool`: %v", err)
+		fallthrough
 	default:
 		const short = ".github-issue-token"
 		filename := filepath.Clean(os.Getenv("HOME") + "/" + short)
